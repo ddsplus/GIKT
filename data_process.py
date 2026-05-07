@@ -64,30 +64,42 @@ def build_adj_list(train_seqs,test_seqs,skill_matrix,qs_num):
     #0:skill 1:question
     #question-skill graph
     interactions = 0
-    single_skill = []
-    adj_list = [[] for _ in range(qs_num)]
+    # Use sets during construction to avoid O(n) membership checks in Python lists.
+    adj_sets = [set() for _ in range(qs_num)]
     num_skill = skill_matrix.shape[0]
 
-    adj_num = [0 for _ in range(qs_num)]
+    # Precompute skill -> linked question indices from skill matrix once.
+    # skill_matrix shape: [num_skill, qs_num]
+    skill_to_questions = []
+    for s in range(num_skill):
+        skill_to_questions.append(np.flatnonzero(skill_matrix[s] == 1).tolist())
 
-    for seqs in [train_seqs,test_seqs]:
+    for seqs in [train_seqs, test_seqs]:
         for seq in seqs:
-            interactions+=len(seq)
+            interactions += len(seq)
             for step in seq:
-                adj_list[step[1]] = np.reshape(np.argwhere(skill_matrix[step[0]] == 1),[-1]).tolist()
-                adj_num[step[1]] += 1
-                for skill_index in np.reshape(np.argwhere(skill_matrix[step[0]] == 1),[-1]).tolist():
-                    adj_num[skill_index] += 1
-                    if skill_index not in single_skill:
-                        single_skill.append(skill_index)
-                    if step[1] not in adj_list[skill_index]:
-                        adj_list[skill_index].append(step[1])
+                skill_id = int(step[0])
+                question_id = int(step[1])
+                if skill_id < 0 or skill_id >= num_skill or question_id < 0 or question_id >= qs_num:
+                    continue
+
+                linked_questions = skill_to_questions[skill_id]
+                if not linked_questions:
+                    continue
+
+                # q -> related skills
+                adj_sets[question_id].update(linked_questions)
+                # skill -> observed questions
+                for skill_index in linked_questions:
+                    if 0 <= skill_index < qs_num:
+                        adj_sets[skill_index].add(question_id)
 
 
     # print("average neighbor question num:{}".format(np.sum([len(adj_list[i]) for i in range(num_skill)])/len(single_skill)))
     # print("average neighbor skill num:{}".format(np.sum([len(adj_list[i]) for i in range(num_skill,qs_num)])/(qs_num-num_skill)))
 
 
+    adj_list = [list(s) for s in adj_sets]
     return adj_list,interactions
 
 def extract_qs_relations(qs_list,s_num,qs_num, q_neighbor_size, s_neighbor_size):
@@ -106,6 +118,9 @@ def extract_qs_relations(qs_list,s_num,qs_num, q_neighbor_size, s_neighbor_size)
                     skill_neighbors[index] = np.random.choice(neighbors, s_neighbor_size, replace=False)
                 else:
                     skill_neighbors[index] = np.random.choice(neighbors, s_neighbor_size, replace=True)
+            else:
+                # Fallback to random question nodes when no neighbors exist.
+                skill_neighbors[index] = np.random.choice(np.arange(s_num, qs_num), s_neighbor_size, replace=True)
         else:#q
             #print(len(neighbors))
             if len(neighbors) not in s_num_dic:
@@ -117,6 +132,9 @@ def extract_qs_relations(qs_list,s_num,qs_num, q_neighbor_size, s_neighbor_size)
                     question_neighbors[index] = np.random.choice(neighbors, q_neighbor_size,replace=False)
                 else:
                     question_neighbors[index] = np.random.choice(neighbors, q_neighbor_size, replace=True)
+            else:
+                # Fallback to random skill nodes when no neighbors exist.
+                question_neighbors[index] = np.random.choice(np.arange(0, s_num), q_neighbor_size, replace=True)
 
     #q_num_dic = sorted(q_num_dic.items(), key=lambda d: d[1])
     # print(s_num_dic)
