@@ -9,6 +9,34 @@ from model import GIKT
 from data_process import DataGenerator
 
 
+def compute_sequence_macro_metrics(preds, binary_preds, targets):
+    auc_list = []
+    acc_list = []
+    p_list = []
+    r_list = []
+    f1_list = []
+
+    for p_seq, b_seq, t_seq in zip(preds, binary_preds, targets):
+        if len(t_seq) == 0:
+            continue
+        acc_list.append(accuracy_score(t_seq, b_seq))
+        precision, recall, f_score, _ = precision_recall_fscore_support(
+            t_seq, b_seq, average="binary", zero_division=0
+        )
+        p_list.append(precision)
+        r_list.append(recall)
+        f1_list.append(f_score)
+        if len(np.unique(t_seq)) > 1:
+            auc_list.append(roc_auc_score(t_seq, p_seq))
+
+    auc_value = float(np.mean(auc_list)) if auc_list else 0.5
+    accuracy = float(np.mean(acc_list)) if acc_list else 0.0
+    precision = float(np.mean(p_list)) if p_list else 0.0
+    recall = float(np.mean(r_list)) if r_list else 0.0
+    f_score = float(np.mean(f1_list)) if f1_list else 0.0
+    return auc_value, accuracy, precision, recall, f_score
+
+
 def train(args, train_dkt):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(args.model)
@@ -71,13 +99,9 @@ def train(args, train_dkt):
                     targets.append(tgt_np[seq_idx, 0:valid_len])
 
             train_loss = overall_loss / max(train_step, 1)
-            preds = np.concatenate(preds) if preds else np.array([0.5])
-            binary_preds = np.concatenate(binary_preds) if binary_preds else np.array([0])
-            targets = np.concatenate(targets) if targets else np.array([0])
-
-            auc_value = roc_auc_score(targets, preds) if len(np.unique(targets)) > 1 else 0.5
-            accuracy = accuracy_score(targets, binary_preds)
-            precision, recall, f_score, _ = precision_recall_fscore_support(targets, binary_preds, average="binary", zero_division=0)
+            auc_value, accuracy, precision, recall, f_score = compute_sequence_macro_metrics(
+                preds, binary_preds, targets
+            )
             print("\ntrain loss = {0},auc={1}, accuracy={2}".format(train_loss, auc_value, accuracy))
             print("train precision={0}, recall={1}, f1={2}".format(precision, recall, f_score))
             write_log(args, model_dir, auc_value, accuracy, epoch, name="train_")
@@ -108,12 +132,9 @@ def train(args, train_dkt):
                         binary_preds.append(bin_np[seq_idx, 0:valid_len])
                         targets.append(tgt_np[seq_idx, 0:valid_len])
 
-            preds = np.concatenate(preds) if preds else np.array([0.5])
-            binary_preds = np.concatenate(binary_preds) if binary_preds else np.array([0])
-            targets = np.concatenate(targets) if targets else np.array([0])
-            test_auc = roc_auc_score(targets, preds) if len(np.unique(targets)) > 1 else 0.5
-            test_acc = accuracy_score(targets, binary_preds)
-            precision, recall, f_score, _ = precision_recall_fscore_support(targets, binary_preds, average="binary", zero_division=0)
+            test_auc, test_acc, precision, recall, f_score = compute_sequence_macro_metrics(
+                preds, binary_preds, targets
+            )
             print("\ntest auc={0}, accuracy={1}, precision={2}, recall={3}, f1={4}".format(test_auc, test_acc, precision, recall, f_score))
             write_log(args, model_dir, test_auc, test_acc, epoch, name="test_")
 
@@ -166,12 +187,9 @@ def train(args, train_dkt):
                     binary_preds.append(bin_np[seq_idx, 0:valid_len])
                     targets.append(tgt_np[seq_idx, 0:valid_len])
 
-        preds = np.concatenate(preds) if preds else np.array([0.5])
-        binary_preds = np.concatenate(binary_preds) if binary_preds else np.array([0])
-        targets = np.concatenate(targets) if targets else np.array([0])
-        auc_value = roc_auc_score(targets, preds) if len(np.unique(targets)) > 1 else 0.5
-        accuracy = accuracy_score(targets, binary_preds)
-        precision, recall, f_score, _ = precision_recall_fscore_support(targets, binary_preds, average="binary", zero_division=0)
+        auc_value, accuracy, precision, recall, f_score = compute_sequence_macro_metrics(
+            preds, binary_preds, targets
+        )
         print("\ntest auc={0}, accuracy={1}, precision={2}, recall={3}, f1={4}".format(auc_value, accuracy, precision, recall, f_score))
         write_log(args, model_dir, auc_value, accuracy, state.get("global_step", 0), name="test_")
 
