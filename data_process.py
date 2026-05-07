@@ -271,7 +271,10 @@ def format_data(seqs, max_step, feature_size, hist_num):
 
     #[batch_size,max_len,feature_size]
     features_answer_index = pad_sequences(seqs,maxlen=max_step, padding='post', value=0)
-    target_answers = pad_sequences(np.array([[j[-1] - feature_size for j in i[1:]] for i in seqs]), maxlen=max_step-1, padding='post', value=0)
+    # Keep as a Python list of variable-length sequences.
+    # Newer NumPy versions raise on ragged np.array construction.
+    target_answer_seqs = [[j[-1] - feature_size for j in i[1:]] for i in seqs]
+    target_answers = pad_sequences(target_answer_seqs, maxlen=max_step-1, padding='post', value=0)
     skills_index = features_answer_index[:,:,0]
     hist_neighbor_index = sample_hist_neighbors(len(seqs),max_step,hist_num,skills_index)#[batch_size,max_step,M]
 
