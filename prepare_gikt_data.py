@@ -48,24 +48,31 @@ def _finalize_and_save(dataset_name, train_user_steps, test_user_steps, out_root
     skill_map = {s: i for i, s in enumerate(sorted(all_train_skills))}
     question_map = {q: i for i, q in enumerate(sorted(all_train_questions))}
     num_skills = len(skill_map)
+    train_question_count = len(question_map)
+    unk_question_id = num_skills + train_question_count
 
     def remap_split(split_steps):
         mapped = {}
+        unknown_question_hits = 0
         for uid, seq in split_steps.items():
             new_seq = []
             for s, q, c in seq:
-                if s not in skill_map or q not in question_map:
+                if s not in skill_map:
                     continue
                 sid = skill_map[s]
-                qid = num_skills + question_map[q]
+                if q in question_map:
+                    qid = num_skills + question_map[q]
+                else:
+                    qid = unk_question_id
+                    unknown_question_hits += 1
                 ans = num_skills + len(question_map) + int(c)
                 new_seq.append((sid, qid, ans))
             if len(new_seq) >= 3:
                 mapped[uid] = new_seq
-        return mapped
+        return mapped, unknown_question_hits
 
-    train_mapped = remap_split(train_user_steps)
-    test_mapped = remap_split(test_user_steps)
+    train_mapped, train_unk_q_hits = remap_split(train_user_steps)
+    test_mapped, test_unk_q_hits = remap_split(test_user_steps)
 
     out_dir = os.path.join(out_root, dataset_name)
     os.makedirs(out_dir, exist_ok=True)
@@ -74,7 +81,8 @@ def _finalize_and_save(dataset_name, train_user_steps, test_user_steps, out_root
     _write_gikt_split(os.path.join(out_dir, f"{dataset_name}_train.csv"), train_sequences)
     _write_gikt_split(os.path.join(out_dir, f"{dataset_name}_test.csv"), test_sequences)
 
-    question_count = len(question_map)
+    # Add one UNK question slot so test-only questions can still be predicted.
+    question_count = train_question_count + 1
     skill_matrix = np.zeros((num_skills, num_skills + question_count), dtype=np.int32)
     # Build graph priors strictly from training split to avoid test leakage.
     for seq in train_mapped.values():
@@ -94,7 +102,9 @@ def _finalize_and_save(dataset_name, train_user_steps, test_user_steps, out_root
             f.write(f"{qid},{seen_questions[qid]}\n")
 
     print(f"[{dataset_name}] train users: {len(train_mapped)}, test users: {len(test_mapped)}")
-    print(f"[{dataset_name}] skills: {num_skills}, questions: {len(question_map)}")
+    print(f"[{dataset_name}] skills: {num_skills}, questions(train+UNK): {question_count}")
+    print(f"[{dataset_name}] unknown test-question mapped to UNK: {test_unk_q_hits}")
+    print(f"[{dataset_name}] unknown train-question mapped to UNK: {train_unk_q_hits}")
     print(f"[{dataset_name}] output: {out_dir}")
 
 
