@@ -57,12 +57,24 @@ class GIKT(nn.Module):
         return self.feature_embedding(idx)
 
     def get_neighbors(self, n_hop, question_index):
+        # seeds[h] shape: [batch, max_step] (h=0) or [batch, max_step, frontier_size] (h>0)
         seeds = [question_index]
+        batch_size = question_index.shape[0]
         for i in range(n_hop):
             if i % 2 == 0:
-                neighbor = self.question_neighbors[seeds[i].reshape(-1)].reshape(-1, self.max_step, self.question_neighbor_num)
+                table = self.question_neighbors
+                neigh_num = self.question_neighbor_num
             else:
-                neighbor = self.skill_neighbors[seeds[i].reshape(-1)].reshape(-1, self.max_step, self.skill_neighbor_num)
+                table = self.skill_neighbors
+                neigh_num = self.skill_neighbor_num
+
+            cur = seeds[i].long()
+            cur = cur.clamp(min=0, max=table.shape[0] - 1)
+            flat = cur.reshape(-1)
+            gathered = table[flat]  # [batch * max_step * frontier, neigh_num]
+
+            # Keep batch/max_step fixed and expand frontier in the 3rd axis.
+            neighbor = gathered.reshape(batch_size, self.max_step, -1)
             seeds.append(neighbor)
         return seeds
 
