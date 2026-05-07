@@ -31,9 +31,7 @@ def _to_gikt_sequences(user_steps):
     for _, steps in user_steps.items():
         seq = []
         for skill_id, question_id, correct in steps:
-            sid = skill_id + skill_offset
-            qid = question_id + question_offset
-            seq.append([sid, qid, correct])
+            seq.append([int(skill_id), int(question_id), int(correct)])
         if len(seq) >= 3:
             out.append(seq)
     return out
@@ -101,7 +99,7 @@ def _finalize_and_save(dataset_name, train_user_steps, test_user_steps, out_root
 
 def preprocess_assist2009(data_root, out_root, dataset_name):
     path = os.path.join(data_root, "ASSIST2009", "skill_builder_data.csv")
-    df = pd.read_csv(path, index_col=0, encoding="latin1")
+    df = pd.read_csv(path, index_col=0, encoding="latin1", low_memory=False)
     req = ["user_id", "order_id", "problem_id", "skill_id", "correct"]
     df = df.dropna(subset=req).copy()
     for c in req:
@@ -131,7 +129,7 @@ def preprocess_assist2009(data_root, out_root, dataset_name):
 
 def preprocess_assist2017(data_root, out_root, dataset_name):
     path = os.path.join(data_root, "ASSIST2017", "anonymized_full_release_competition_dataset.csv")
-    df = pd.read_csv(path, encoding="utf-8")
+    df = pd.read_csv(path, encoding="utf-8", low_memory=False)
     req = ["studentId", "startTime", "problemId", "skill", "correct"]
     df = df.dropna(subset=req).copy()
     df["studentId"] = df["studentId"].astype(int)
