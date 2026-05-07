@@ -1,4 +1,5 @@
 import os
+import glob
 import numpy as np
 import torch
 from tqdm import tqdm
@@ -120,8 +121,7 @@ def train(args, train_dkt):
                 print("%3.4f to %3.4f" % (best_test_auc, test_auc))
                 best_test_auc = test_auc
                 best_epoch = epoch
-                checkpoint_dir = os.path.join(args.checkpoint_dir, model_dir)
-                save(best_epoch, model, optimizer, checkpoint_dir)
+                save_best_checkpoint(args, model_dir, best_epoch, model, optimizer, test_auc, test_acc)
                 epochs_without_improve = 0
             else:
                 epochs_without_improve += 1
@@ -131,8 +131,7 @@ def train(args, train_dkt):
                 print("Early stopping triggered at epoch {0}, best epoch {1}, best test auc {2}".format(epoch, best_epoch, best_test_auc))
                 break
     else:
-        checkpoint_dir = os.path.join(args.checkpoint_dir, model_dir)
-        checkpoint_path = os.path.join(checkpoint_dir, "GIKT.pt")
+        checkpoint_path = resolve_checkpoint_path(args, model_dir)
         if not os.path.exists(checkpoint_path):
             raise FileNotFoundError("Checkpoint not found: {}".format(checkpoint_path))
         state = torch.load(checkpoint_path, map_location=device)
@@ -188,6 +187,52 @@ def save(global_step, model, optimizer, checkpoint_dir):
     }
     torch.save(payload, os.path.join(checkpoint_dir, model_name))
     print("Save checkpoint at %d" % global_step)
+
+
+def save_best_checkpoint(args, model_dir, global_step, model, optimizer, auc_value, acc_value):
+    # Keep legacy path to avoid breaking existing inference scripts.
+    legacy_dir = os.path.join(args.checkpoint_dir, model_dir)
+    save(global_step, model, optimizer, legacy_dir)
+
+    # New organized path: checkpoint/<dataset>/<auc_acc_dataset_time>.pt
+    dataset_dir = os.path.join(args.checkpoint_dir, args.dataset)
+    os.makedirs(dataset_dir, exist_ok=True)
+    time_tag = str(args.tag).replace(".", "_")
+    model_name = "auc_{:.4f}_acc_{:.4f}_{}_{}.pt".format(
+        auc_value,
+        acc_value,
+        args.dataset,
+        time_tag,
+    )
+    payload = {
+        "global_step": global_step,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "dataset": args.dataset,
+        "auc": float(auc_value),
+        "acc": float(acc_value),
+        "time_tag": str(args.tag),
+    }
+    ckpt_path = os.path.join(dataset_dir, model_name)
+    torch.save(payload, ckpt_path)
+    print("Save best checkpoint:", ckpt_path)
+
+
+def resolve_checkpoint_path(args, model_dir):
+    # 1) Legacy path (original behavior).
+    legacy_path = os.path.join(args.checkpoint_dir, model_dir, "GIKT.pt")
+    if os.path.exists(legacy_path):
+        return legacy_path
+
+    # 2) New organized path, pick the latest modified best checkpoint for dataset.
+    dataset_dir = os.path.join(args.checkpoint_dir, args.dataset)
+    pattern = os.path.join(dataset_dir, "auc_*_acc_*_{}_*.pt".format(args.dataset))
+    candidates = glob.glob(pattern)
+    if candidates:
+        candidates.sort(key=os.path.getmtime, reverse=True)
+        return candidates[0]
+
+    return legacy_path
 
 
 def save_model_dir(args):

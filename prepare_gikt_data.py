@@ -76,7 +76,8 @@ def _finalize_and_save(dataset_name, train_user_steps, test_user_steps, out_root
 
     question_count = len(question_map)
     skill_matrix = np.zeros((num_skills, num_skills + question_count), dtype=np.int32)
-    for seq in list(train_mapped.values()) + list(test_mapped.values()):
+    # Build graph priors strictly from training split to avoid test leakage.
+    for seq in train_mapped.values():
         for sid, qid, _ in seq:
             skill_matrix[sid, qid] = 1
     np.savetxt(os.path.join(out_dir, f"{dataset_name}_skill_matrix.txt"), skill_matrix, fmt="%d")
@@ -85,7 +86,7 @@ def _finalize_and_save(dataset_name, train_user_steps, test_user_steps, out_root
     with open(ques_skill_path, "w", encoding="utf-8") as f:
         f.write("problem_id,skill_id\n")
         seen_questions = {}
-        for seq in list(train_mapped.values()) + list(test_mapped.values()):
+        for seq in train_mapped.values():
             for sid, qid, _ in seq:
                 if qid not in seen_questions:
                     seen_questions[qid] = sid

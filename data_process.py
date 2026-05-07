@@ -42,7 +42,7 @@ def data_process(args):
     matrix_directory = os.path.join(args.data_dir, args.dataset, args.dataset + '_skill_matrix.txt')
     args.skill_matrix = np.loadtxt(matrix_directory) #multi-skill
 
-    qs_adj_list,interactions = build_adj_list(args.train_seqs,args.test_seqs,args.skill_matrix,args.qs_num)#[[neighbor skill/question] for all qs]]
+    qs_adj_list,interactions = build_adj_list(args.train_seqs,args.skill_matrix,args.qs_num)#[[neighbor skill/question] for all qs]]
     args.question_neighbors,args.skill_neighbors = extract_qs_relations(qs_adj_list,args.skill_num,args.qs_num,args.question_neighbor_num,args.skill_neighbor_num)
     # print(args.question_neighbors.shape)#the first s_num rows are 0
     # print(args.skill_neighbors.shape)
@@ -58,7 +58,7 @@ def select_part_seqs(min_len,max_len,seqs):
     print("seq num is: %d"%len(temp_seqs))
     return temp_seqs
 
-def build_adj_list(train_seqs,test_seqs,skill_matrix,qs_num):
+def build_adj_list(train_seqs,skill_matrix,qs_num):
     #seqs:list-num_students,seq_len,field_size
     #skill_matrix:[num_skill,num_skill]
     #0:skill 1:question
@@ -88,15 +88,14 @@ def build_adj_list(train_seqs,test_seqs,skill_matrix,qs_num):
             adj_sets[q].add(s)   # question -> skill
 
     # Add observed edges from sequences for robustness.
-    for seqs in [train_seqs, test_seqs]:
-        for seq in seqs:
-            interactions += len(seq)
-            for step in seq:
-                s = int(step[0])
-                q = int(step[1])
-                if 0 <= s < num_skill and num_skill <= q < qs_num:
-                    adj_sets[s].add(q)
-                    adj_sets[q].add(s)
+    for seq in train_seqs:
+        interactions += len(seq)
+        for step in seq:
+            s = int(step[0])
+            q = int(step[1])
+            if 0 <= s < num_skill and num_skill <= q < qs_num:
+                adj_sets[s].add(q)
+                adj_sets[q].add(s)
 
 
     # print("average neighbor question num:{}".format(np.sum([len(adj_list[i]) for i in range(num_skill)])/len(single_skill)))
