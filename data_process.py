@@ -64,35 +64,39 @@ def build_adj_list(train_seqs,test_seqs,skill_matrix,qs_num):
     #0:skill 1:question
     #question-skill graph
     interactions = 0
-    # Use sets during construction to avoid O(n) membership checks in Python lists.
     adj_sets = [set() for _ in range(qs_num)]
     num_skill = skill_matrix.shape[0]
 
-    # Precompute skill -> linked question indices from skill matrix once.
-    # skill_matrix shape: [num_skill, qs_num]
+    # Build bipartite links from matrix:
+    # rows are skills [0, num_skill), columns are global node ids [0, qs_num)
+    # valid question ids are expected in [num_skill, qs_num)
     skill_to_questions = []
     for s in range(num_skill):
-        skill_to_questions.append(np.flatnonzero(skill_matrix[s] == 1).tolist())
+        cols = np.flatnonzero(skill_matrix[s] == 1).tolist()
+        q_neighbors = [q for q in cols if num_skill <= q < qs_num]
+        skill_to_questions.append(q_neighbors)
 
+    question_to_skills = [[] for _ in range(qs_num)]
+    for s in range(num_skill):
+        for q in skill_to_questions[s]:
+            question_to_skills[q].append(s)
+
+    # Build static graph from matrix links.
+    for s in range(num_skill):
+        for q in skill_to_questions[s]:
+            adj_sets[s].add(q)   # skill -> question
+            adj_sets[q].add(s)   # question -> skill
+
+    # Add observed edges from sequences for robustness.
     for seqs in [train_seqs, test_seqs]:
         for seq in seqs:
             interactions += len(seq)
             for step in seq:
-                skill_id = int(step[0])
-                question_id = int(step[1])
-                if skill_id < 0 or skill_id >= num_skill or question_id < 0 or question_id >= qs_num:
-                    continue
-
-                linked_questions = skill_to_questions[skill_id]
-                if not linked_questions:
-                    continue
-
-                # q -> related skills
-                adj_sets[question_id].update(linked_questions)
-                # skill -> observed questions
-                for skill_index in linked_questions:
-                    if 0 <= skill_index < qs_num:
-                        adj_sets[skill_index].add(question_id)
+                s = int(step[0])
+                q = int(step[1])
+                if 0 <= s < num_skill and num_skill <= q < qs_num:
+                    adj_sets[s].add(q)
+                    adj_sets[q].add(s)
 
 
     # print("average neighbor question num:{}".format(np.sum([len(adj_list[i]) for i in range(num_skill)])/len(single_skill)))
