@@ -6,6 +6,7 @@ from tqdm import tqdm
 from sklearn.metrics import roc_auc_score, precision_recall_fscore_support, accuracy_score
 
 from model import GIKT
+from hgkt import HGKT
 from data_process import DataGenerator
 
 
@@ -40,7 +41,10 @@ def compute_sequence_macro_metrics(preds, binary_preds, targets):
 def train(args, train_dkt):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(args.model)
-    model = GIKT(args).to(device)
+    if args.model.lower() == "hgkt":
+        model = HGKT(args).to(device)
+    else:
+        model = GIKT(args).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8)
 
     model_dir = save_model_dir(args)
