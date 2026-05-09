@@ -21,6 +21,8 @@ def build_parser():
     parser.add_argument("--hidden_neurons", type=str, default="[200,100]")
     parser.add_argument("--dropout_keep_probs", type=str, default="[0.6,0.8,1]")
     parser.add_argument("--aggregator", type=str, default="sum")
+    parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--lr_decay", type=float, default=0.92)
     parser.add_argument("--l2_weight", type=float, default=1e-8)
     parser.add_argument("--limit_max_len", type=int, default=200)
     parser.add_argument("--limit_min_len", type=int, default=3)
@@ -111,4 +113,3 @@ def evaluate(args):
 if __name__ == "__main__":
     parser = build_parser()
     evaluate(parser.parse_args())
-
