@@ -1,6 +1,9 @@
-# GIKT (PyTorch)
+# GIKT / HGKT (PyTorch)
 
-本仓库已改为 PyTorch 训练版本，并支持从 `Data/` 下的 4 个原始数据集一键生成本模型训练格式。
+本项目支持两类知识追踪模型：
+
+- `gikt`：原始 GIKT 模型（项目已有实现）
+- `hgkt`：按 `HGKT_SIGIR.tex` 落地的 HGKT 实现（新增 `hgkt/` 目录）
 
 ## 1. 环境要求
 
@@ -11,15 +14,27 @@
 - `scikit-learn`
 - `tqdm`
 
-安装示例：
+安装依赖：
 
 ```bash
 pip install torch numpy pandas scikit-learn tqdm
 ```
 
-## 2. 数据目录约定
+## 2. 目录结构
 
-原始数据放在 `Data/`（已存在）：
+- `main.py`：训练入口（也支持 `--train false` 走旧推理流程）
+- `infer.py`：新推理入口（显式输入数据集、模型类型、模型路径）
+- `train.py`：训练、评估、保存 best checkpoint
+- `model.py`：GIKT 模型
+- `hgkt/`：HGKT 模型与 HEG 构建代码
+- `data_process.py`：数据读取、切分、batch 构建
+- `prepare_gikt_data.py`：原始数据预处理脚本
+
+## 3. 数据准备
+
+### 3.1 原始数据放置
+
+将原始数据放在 `Data/` 目录下，参考：
 
 - `Data/ASSIST2009/skill_builder_data.csv`
 - `Data/ASSIST2017/anonymized_full_release_competition_dataset.csv`
@@ -27,16 +42,9 @@ pip install torch numpy pandas scikit-learn tqdm
 - `Data/XES3G5M/train.csv`
 - `Data/XES3G5M/test.csv`
 
-预处理输出到 `data/`：
+### 3.2 生成训练/测试数据
 
-- `data/<dataset>/<dataset>_train.csv`
-- `data/<dataset>/<dataset>_test.csv`
-- `data/<dataset>/<dataset>_skill_matrix.txt`
-- `data/<dataset>/ques_skill.csv`
-
-## 3. 预处理（本模型专用）
-
-使用统一脚本 `prepare_gikt_data.py`：
+执行（示例）：
 
 ```bash
 python prepare_gikt_data.py --dataset assist2009
@@ -45,80 +53,149 @@ python prepare_gikt_data.py --dataset statics2011
 python prepare_gikt_data.py --dataset xes3g5m
 ```
 
-可选参数：
+生成结果在 `data/<dataset>/`：
 
-- `--data_root`：原始数据目录，默认 `Data`
-- `--out_root`：输出目录，默认 `data`
-- `--dataset_name`：输出子目录和文件名前缀（默认和 `--dataset` 相同）
+- `<dataset>_train.csv`
+- `<dataset>_test.csv`
+- `<dataset>_skill_matrix.txt`
+- `ques_skill.csv`
 
-示例：
+## 4. 训练操作（详细）
 
-```bash
-python prepare_gikt_data.py --dataset assist2009 --dataset_name assist2009
-```
-
-## 4. 训练
-
-训练脚本为 `main.py`，当前策略：
-
-- 无验证集
-- 每个 epoch 在测试集上输出 `AUC / ACC`（同时输出 precision/recall/f1）
-- 按测试集 AUC 保存最佳模型
-- 早停耐心 `patience=10`
-
-示例：
+### 4.1 训练 GIKT
 
 ```bash
-python main.py --dataset assist2009 --num_epochs 150 --patience 10 --batch_size 32 --lr 0.001
+python main.py --dataset assist2009 --model gikt --num_epochs 150 --batch_size 32 --lr 0.001
 ```
 
-可用数据集名（对应你预处理时的 `--dataset_name`）：
+### 4.2 训练 HGKT
 
-- `assist2009`
-- `assist2017`
-- `statics2011`
-- `xes3g5m`
+```bash
+python main.py --dataset assist2009 --model hgkt --num_epochs 150 --batch_size 32 --lr 0.001
+```
 
-## 5. 测试集监控与最佳模型保存
+HGKT常用参数：
 
-训练时每轮会打印：
+- `--seq_attn_window`：序列注意力窗口，默认 `20`
+- `--hgkt_exer_layers`：exercise 图卷积层数，默认 `2`
+- `--hgkt_schema_layers`：schema 图卷积层数，默认 `1`
+
+### 4.3 训练输出说明
+
+每个 epoch 会输出：
 
 - `train loss / train auc / train accuracy`
-- `test auc / test accuracy`
+- `train precision / recall / f1`
+- `test auc / test accuracy / precision / recall / f1`
 
-最佳模型保存路径：
+早停策略：
 
-- `checkpoint/<model_dir>/GIKT.pt`
+- 参数 `--patience` 控制连续多少个 epoch 无提升后停止训练（默认 `10`）
 
-其中 `<model_dir>` 含数据集名、超参数和时间戳。
-
-## 6. 日志与配置文件
-
-日志目录：
+日志文件：
 
 - `logs/train_*.csv`
 - `logs/test_*.csv`
-
-启动配置（含超参数）：
-
 - `logs/<timestamp>_config.json`
 
-## 7. 仅测试模式
+### 4.4 best 模型保存规则（已按模型隔离）
 
-若只跑测试（加载已保存模型）：
-
-```bash
-python main.py --train false --dataset assist2009
-```
-
-要求对应的 checkpoint 已存在于：
+#### 兼容旧逻辑路径
 
 - `checkpoint/<model_dir>/GIKT.pt`
 
-## 8. 主要脚本说明
+#### 新 best 路径（推荐）
 
-- `prepare_gikt_data.py`：四个原始数据集到 GIKT 训练格式转换
-- `data_process.py`：读取 `data/<dataset>/` 下训练/测试文件并构图
-- `model.py`：PyTorch GIKT 模型定义
-- `train.py`：训练、测试监控、早停、最佳模型保存
-- `main.py`：训练入口和参数管理
+- `checkpoint/<dataset>/<model>/auc_<auc>_acc_<acc>_<dataset>_<model>_<time>.pt`
+
+例如：
+
+- `checkpoint/assist2009/gikt/auc_0.8123_acc_0.7456_assist2009_gikt_*.pt`
+- `checkpoint/assist2009/hgkt/auc_0.8268_acc_0.7580_assist2009_hgkt_*.pt`
+
+这样 `gikt` 与 `hgkt` 不会覆盖彼此最佳模型。
+
+## 5. 推理操作（详细）
+
+项目有两种推理方式，推荐使用 `infer.py`。
+
+### 5.1 推荐：使用 `infer.py`（显式传模型路径）
+
+命令格式：
+
+```bash
+python infer.py --dataset <dataset> --model <gikt|hgkt> --model_path <checkpoint_path>
+```
+
+示例（GIKT）：
+
+```bash
+python infer.py --dataset assist2009 --model gikt --model_path checkpoint/assist2009/gikt/auc_xxx_acc_xxx_assist2009_gikt_xxx.pt
+```
+
+示例（HGKT）：
+
+```bash
+python infer.py --dataset assist2009 --model hgkt --model_path checkpoint/assist2009/hgkt/auc_xxx_acc_xxx_assist2009_hgkt_xxx.pt
+```
+
+输出指标：
+
+- `test auc`
+- `test accuracy`
+- `test precision`
+- `test recall`
+- `test f1`
+
+### 5.2 兼容方式：`main.py --train false`
+
+```bash
+python main.py --train false --dataset assist2009 --model gikt
+python main.py --train false --dataset assist2009 --model hgkt
+```
+
+该方式会按内置规则自动找 checkpoint（优先模型隔离目录）。
+
+## 6. 关键参数说明
+
+- `--dataset`：数据集名（如 `assist2009`）
+- `--model`：`gikt` 或 `hgkt`
+- `--batch_size`：batch 大小
+- `--max_step`：序列最大长度
+- `--lr`：学习率
+- `--num_epochs`：训练轮数
+- `--patience`：早停耐心值
+
+GIKT相关：
+
+- `--n_hop`
+- `--skill_neighbor_num`
+- `--question_neighbor_num`
+- `--hist_neighbor_num`
+- `--next_neighbor_num`
+- `--sim_emb`
+- `--att_bound`
+
+HGKT相关：
+
+- `--seq_attn_window`
+- `--hgkt_exer_layers`
+- `--hgkt_schema_layers`
+
+## 7. 常见问题
+
+### 7.1 旧的 GIKT 模型还能用吗？
+
+能用。推理时传 `--model gikt` 并指定对应权重即可。
+
+### 7.2 为什么会加载失败（shape mismatch）？
+
+通常是模型类型和权重不匹配：
+
+- `gikt` 权重必须配 `--model gikt`
+- `hgkt` 权重必须配 `--model hgkt`
+
+### 7.3 如何避免模型互相覆盖？
+
+已按 `checkpoint/<dataset>/<model>/` 分目录保存 best 模型，不会覆盖。
+

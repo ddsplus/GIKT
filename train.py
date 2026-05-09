@@ -216,14 +216,16 @@ def save_best_checkpoint(args, model_dir, global_step, model, optimizer, auc_val
     legacy_dir = os.path.join(args.checkpoint_dir, model_dir)
     save(global_step, model, optimizer, legacy_dir)
 
-    # New organized path: checkpoint/<dataset>/<auc_acc_dataset_time>.pt
-    dataset_dir = os.path.join(args.checkpoint_dir, args.dataset)
-    os.makedirs(dataset_dir, exist_ok=True)
+    # New organized path: checkpoint/<dataset>/<model>/<auc_acc_dataset_model_time>.pt
+    model_tag = str(args.model).lower()
+    dataset_model_dir = os.path.join(args.checkpoint_dir, args.dataset, model_tag)
+    os.makedirs(dataset_model_dir, exist_ok=True)
     time_tag = str(args.tag).replace(".", "_")
-    model_name = "auc_{:.4f}_acc_{:.4f}_{}_{}.pt".format(
+    model_name = "auc_{:.4f}_acc_{:.4f}_{}_{}_{}.pt".format(
         auc_value,
         acc_value,
         args.dataset,
+        model_tag,
         time_tag,
     )
     payload = {
@@ -231,22 +233,36 @@ def save_best_checkpoint(args, model_dir, global_step, model, optimizer, auc_val
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "dataset": args.dataset,
+        "model": model_tag,
         "auc": float(auc_value),
         "acc": float(acc_value),
         "time_tag": str(args.tag),
     }
-    ckpt_path = os.path.join(dataset_dir, model_name)
+    ckpt_path = os.path.join(dataset_model_dir, model_name)
     torch.save(payload, ckpt_path)
     print("Save best checkpoint:", ckpt_path)
 
 
 def resolve_checkpoint_path(args, model_dir):
+    model_tag = str(args.model).lower()
+
+    # 0) New model-specific path (preferred): checkpoint/<dataset>/<model>/...
+    dataset_model_dir = os.path.join(args.checkpoint_dir, args.dataset, model_tag)
+    pattern_model = os.path.join(
+        dataset_model_dir,
+        "auc_*_acc_*_{}_{}_*.pt".format(args.dataset, model_tag),
+    )
+    model_candidates = glob.glob(pattern_model)
+    if model_candidates:
+        model_candidates.sort(key=os.path.getmtime, reverse=True)
+        return model_candidates[0]
+
     # 1) Legacy path (original behavior).
     legacy_path = os.path.join(args.checkpoint_dir, model_dir, "GIKT.pt")
     if os.path.exists(legacy_path):
         return legacy_path
 
-    # 2) New organized path, pick the latest modified best checkpoint for dataset.
+    # 2) Backward-compatible dataset path (before model-specific split).
     dataset_dir = os.path.join(args.checkpoint_dir, args.dataset)
     pattern = os.path.join(dataset_dir, "auc_*_acc_*_{}_*.pt".format(args.dataset))
     candidates = glob.glob(pattern)
