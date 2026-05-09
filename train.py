@@ -198,7 +198,7 @@ def train(args, train_dkt):
         write_log(args, model_dir, auc_value, accuracy, state.get("global_step", 0), name="test_")
 
 
-def save(global_step, model, optimizer, checkpoint_dir):
+def save(global_step, model, optimizer, checkpoint_dir, extra_payload=None):
     model_name = "GIKT.pt"
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir, exist_ok=True)
@@ -207,14 +207,23 @@ def save(global_step, model, optimizer, checkpoint_dir):
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
     }
+    if extra_payload:
+        payload.update(extra_payload)
     torch.save(payload, os.path.join(checkpoint_dir, model_name))
     print("Save checkpoint at %d" % global_step)
 
 
 def save_best_checkpoint(args, model_dir, global_step, model, optimizer, auc_value, acc_value):
+    common_payload = {
+        "dataset": args.dataset,
+        "model": str(args.model).lower(),
+        "question_neighbors": np.asarray(args.question_neighbors),
+        "skill_neighbors": np.asarray(args.skill_neighbors),
+        "seed": int(getattr(args, "seed", 42)),
+    }
     # Keep legacy path to avoid breaking existing inference scripts.
     legacy_dir = os.path.join(args.checkpoint_dir, model_dir)
-    save(global_step, model, optimizer, legacy_dir)
+    save(global_step, model, optimizer, legacy_dir, extra_payload=common_payload)
 
     # New organized path: checkpoint/<dataset>/<model>/<auc_acc_dataset_model_time>.pt
     model_tag = str(args.model).lower()
@@ -234,6 +243,9 @@ def save_best_checkpoint(args, model_dir, global_step, model, optimizer, auc_val
         "optimizer_state_dict": optimizer.state_dict(),
         "dataset": args.dataset,
         "model": model_tag,
+        "question_neighbors": np.asarray(args.question_neighbors),
+        "skill_neighbors": np.asarray(args.skill_neighbors),
+        "seed": int(getattr(args, "seed", 42)),
         "auc": float(auc_value),
         "acc": float(acc_value),
         "time_tag": str(args.tag),

@@ -147,6 +147,11 @@ python infer.py --dataset assist2009 --model hgkt --model_path checkpoint/assist
 - `test recall`
 - `test f1`
 
+说明：
+
+- `infer.py` 会优先复用 checkpoint 内保存的 `question_neighbors/skill_neighbors`（若存在），避免推理时重采样邻居导致结果漂移。
+- 若 checkpoint 较老不含上述字段，则会按当前随机种子重建邻居图。可通过 `--seed` 固定结果复现。
+
 ### 5.2 兼容方式：`main.py --train false`
 
 ```bash
@@ -198,4 +203,3 @@ HGKT相关：
 ### 7.3 如何避免模型互相覆盖？
 
 已按 `checkpoint/<dataset>/<model>/` 分目录保存 best 模型，不会覆盖。
-

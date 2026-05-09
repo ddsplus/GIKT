@@ -3,6 +3,7 @@ import ast
 import time
 import os
 import numpy as np
+import torch
 from data_process import *
 from train import train
 import json
@@ -59,6 +60,7 @@ def main():
     arg_parser.add_argument('--seq_attn_window', type=int, default=20)
     arg_parser.add_argument('--hgkt_exer_layers', type=int, default=2)
     arg_parser.add_argument('--hgkt_schema_layers', type=int, default=1)
+    arg_parser.add_argument('--seed', type=int, default=42)
 
 
 
@@ -66,6 +68,10 @@ def main():
     args.hidden_neurons = ast.literal_eval(args.hidden_neurons)
     args.dropout_keep_probs = ast.literal_eval(args.dropout_keep_probs)
     args.select_index = ast.literal_eval(args.select_index)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
     train_dkt = args.train
     print(args.model)
     tag_path = os.path.join("%s_tag.txt"%args.dataset)

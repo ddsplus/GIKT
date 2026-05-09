@@ -39,6 +39,7 @@ def build_parser():
     parser.add_argument("--next_neighbor_num", type=int, default=4)
     parser.add_argument("--att_bound", type=float, default=0.5)
     parser.add_argument("--sim_emb", type=str, default="skill_emb")
+    parser.add_argument("--seed", type=int, default=42)
 
     # HGKT options
     parser.add_argument("--seq_attn_window", type=int, default=20)
@@ -51,11 +52,28 @@ def evaluate(args):
     if not os.path.exists(args.model_path):
         raise FileNotFoundError("Model checkpoint not found: {}".format(args.model_path))
 
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+
+    # Explicitly keep current behavior and avoid FutureWarning default flip.
+    try:
+        state = torch.load(args.model_path, map_location="cpu", weights_only=False)
+    except TypeError:
+        state = torch.load(args.model_path, map_location="cpu")
+
     args.hidden_neurons = ast.literal_eval(args.hidden_neurons)
     args.dropout_keep_probs = ast.literal_eval(args.dropout_keep_probs)
     args.select_index = ast.literal_eval(args.select_index)
 
     args = data_process(args)
+
+    # Reuse training-time neighbors if checkpoint provides them.
+    if "question_neighbors" in state and "skill_neighbors" in state:
+        args.question_neighbors = np.asarray(state["question_neighbors"])
+        args.skill_neighbors = np.asarray(state["skill_neighbors"])
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if args.model == "hgkt":
@@ -63,7 +81,15 @@ def evaluate(args):
     else:
         model = GIKT(args).to(device)
 
-    state = torch.load(args.model_path, map_location=device)
+    if "model" in state and isinstance(state["model"], str):
+        ckpt_model = state["model"].lower()
+        if ckpt_model != args.model:
+            raise ValueError(
+                "Model type mismatch: checkpoint model='{}' but --model='{}'".format(
+                    ckpt_model, args.model
+                )
+            )
+    # Move tensors inside state dict to target device through load_state_dict call.
     model.load_state_dict(state["model_state_dict"])
     model.eval()
 
