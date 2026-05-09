@@ -8,7 +8,7 @@ import torch
 from data_process import data_process, DataGenerator
 from model import GIKT
 from hgkt import HGKT
-from train import compute_sequence_macro_metrics
+from train import compute_global_metrics
 
 
 def build_parser():
@@ -142,7 +142,7 @@ def evaluate(args):
                 binary_preds.append(bin_np[seq_idx, 0:valid_len])
                 targets.append(tgt_np[seq_idx, 0:valid_len])
 
-    auc_value, accuracy, precision, recall, f_score = compute_sequence_macro_metrics(
+    auc_value, accuracy, precision, recall, f_score = compute_global_metrics(
         preds, binary_preds, targets
     )
     print("dataset={}".format(args.dataset))

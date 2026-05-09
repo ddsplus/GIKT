@@ -10,32 +10,34 @@ from hgkt import HGKT
 from data_process import DataGenerator
 
 
-def compute_sequence_macro_metrics(preds, binary_preds, targets):
-    auc_list = []
-    acc_list = []
-    p_list = []
-    r_list = []
-    f1_list = []
+def compute_global_metrics(preds, binary_preds, targets):
+    flat_preds = []
+    flat_binary_preds = []
+    flat_targets = []
 
     for p_seq, b_seq, t_seq in zip(preds, binary_preds, targets):
         if len(t_seq) == 0:
             continue
-        acc_list.append(accuracy_score(t_seq, b_seq))
-        precision, recall, f_score, _ = precision_recall_fscore_support(
-            t_seq, b_seq, average="binary", zero_division=0
-        )
-        p_list.append(precision)
-        r_list.append(recall)
-        f1_list.append(f_score)
-        if len(np.unique(t_seq)) > 1:
-            auc_list.append(roc_auc_score(t_seq, p_seq))
+        flat_preds.append(np.asarray(p_seq).reshape(-1))
+        flat_binary_preds.append(np.asarray(b_seq).reshape(-1))
+        flat_targets.append(np.asarray(t_seq).reshape(-1))
 
-    auc_value = float(np.mean(auc_list)) if auc_list else 0.5
-    accuracy = float(np.mean(acc_list)) if acc_list else 0.0
-    precision = float(np.mean(p_list)) if p_list else 0.0
-    recall = float(np.mean(r_list)) if r_list else 0.0
-    f_score = float(np.mean(f1_list)) if f1_list else 0.0
-    return auc_value, accuracy, precision, recall, f_score
+    if not flat_targets:
+        return 0.5, 0.0, 0.0, 0.0, 0.0
+
+    y_true = np.concatenate(flat_targets, axis=0).astype(np.int64)
+    y_pred_prob = np.concatenate(flat_preds, axis=0).astype(np.float64)
+    y_pred_bin = np.concatenate(flat_binary_preds, axis=0).astype(np.int64)
+
+    if len(np.unique(y_true)) > 1:
+        auc_value = float(roc_auc_score(y_true, y_pred_prob))
+    else:
+        auc_value = 0.5
+    accuracy = float(accuracy_score(y_true, y_pred_bin))
+    precision, recall, f_score, _ = precision_recall_fscore_support(
+        y_true, y_pred_bin, average="binary", zero_division=0
+    )
+    return auc_value, accuracy, float(precision), float(recall), float(f_score)
 
 
 def train(args, train_dkt):
@@ -103,7 +105,7 @@ def train(args, train_dkt):
                     targets.append(tgt_np[seq_idx, 0:valid_len])
 
             train_loss = overall_loss / max(train_step, 1)
-            auc_value, accuracy, precision, recall, f_score = compute_sequence_macro_metrics(
+            auc_value, accuracy, precision, recall, f_score = compute_global_metrics(
                 preds, binary_preds, targets
             )
             print("\ntrain loss = {0},auc={1}, accuracy={2}".format(train_loss, auc_value, accuracy))
@@ -136,7 +138,7 @@ def train(args, train_dkt):
                         binary_preds.append(bin_np[seq_idx, 0:valid_len])
                         targets.append(tgt_np[seq_idx, 0:valid_len])
 
-            test_auc, test_acc, precision, recall, f_score = compute_sequence_macro_metrics(
+            test_auc, test_acc, precision, recall, f_score = compute_global_metrics(
                 preds, binary_preds, targets
             )
             print("\ntest auc={0}, accuracy={1}, precision={2}, recall={3}, f1={4}".format(test_auc, test_acc, precision, recall, f_score))
@@ -191,7 +193,7 @@ def train(args, train_dkt):
                     binary_preds.append(bin_np[seq_idx, 0:valid_len])
                     targets.append(tgt_np[seq_idx, 0:valid_len])
 
-        auc_value, accuracy, precision, recall, f_score = compute_sequence_macro_metrics(
+        auc_value, accuracy, precision, recall, f_score = compute_global_metrics(
             preds, binary_preds, targets
         )
         print("\ntest auc={0}, accuracy={1}, precision={2}, recall={3}, f1={4}".format(auc_value, accuracy, precision, recall, f_score))
