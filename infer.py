@@ -1,6 +1,7 @@
 import argparse
 import ast
 import os
+import json
 import numpy as np
 import torch
 
@@ -16,6 +17,7 @@ def build_parser():
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--model", type=str, required=True, choices=["gikt", "hgkt"])
     parser.add_argument("--model_path", type=str, required=True)
+    parser.add_argument("--config_path", type=str, default="")
 
     # Keep aligned with training defaults for reproducibility.
     parser.add_argument("--hidden_neurons", type=str, default="[200,100]")
@@ -63,16 +65,33 @@ def evaluate(args):
     except TypeError:
         state = torch.load(args.model_path, map_location="cpu")
 
-    args.hidden_neurons = ast.literal_eval(args.hidden_neurons)
-    args.dropout_keep_probs = ast.literal_eval(args.dropout_keep_probs)
-    args.select_index = ast.literal_eval(args.select_index)
+    # Optional: load the exact training config for full reproducibility.
+    if args.config_path:
+        if not os.path.exists(args.config_path):
+            raise FileNotFoundError("Config file not found: {}".format(args.config_path))
+        with open(args.config_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        for key, val in cfg.items():
+            if hasattr(args, key):
+                setattr(args, key, val)
+
+    args.hidden_neurons = ast.literal_eval(args.hidden_neurons) if isinstance(args.hidden_neurons, str) else args.hidden_neurons
+    args.dropout_keep_probs = ast.literal_eval(args.dropout_keep_probs) if isinstance(args.dropout_keep_probs, str) else args.dropout_keep_probs
+    args.select_index = ast.literal_eval(args.select_index) if isinstance(args.select_index, str) else args.select_index
 
     args = data_process(args)
 
     # Reuse training-time neighbors if checkpoint provides them.
-    if "question_neighbors" in state and "skill_neighbors" in state:
+    has_saved_neighbors = ("question_neighbors" in state and "skill_neighbors" in state)
+    if has_saved_neighbors:
         args.question_neighbors = np.asarray(state["question_neighbors"])
         args.skill_neighbors = np.asarray(state["skill_neighbors"])
+    else:
+        print(
+            "warning: checkpoint has no saved neighbors. "
+            "Inference will rebuild random neighbors from current data/args; "
+            "metrics may drift from training-time best score."
+        )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -129,6 +148,8 @@ def evaluate(args):
     print("dataset={}".format(args.dataset))
     print("model={}".format(args.model))
     print("checkpoint={}".format(args.model_path))
+    if args.config_path:
+        print("config={}".format(args.config_path))
     print("test auc={:.6f}".format(auc_value))
     print("test accuracy={:.6f}".format(accuracy))
     print("test precision={:.6f}".format(precision))
