@@ -147,6 +147,17 @@ python infer.py --dataset assist2009 --model hgkt --model_path checkpoint/assist
 - `test recall`
 - `test f1`
 
+如果需要做鲁棒性测试，可以直接使用 `robust_infer.py`，它会在推理阶段按噪声强度 `0 / 0.1 / 0.2 / 0.3 / 0.4 / 0.5` 依次随机翻转输入答案特征中的一部分 `0 ↔ 1`，并只输出每个噪声强度下的 `AUC` 和 `ACC`：
+
+```bash
+python robust_infer.py --dataset assist2009 --model_path checkpoint/assist2009/gikt/auc_xxx_acc_xxx_assist2009_gikt_xxx.pt
+```
+
+说明：
+
+- `robust_infer.py` 会优先从 checkpoint 中读取模型类型；如果 checkpoint 里没有保存模型名，也可以显式加 `--model gikt` 或 `--model hgkt`。
+- 噪声只作用于推理输入里的答案特征，不修改真实标签，因此输出的是在噪声观测下的模型鲁棒性表现。
+
 说明：
 
 - `infer.py` 会优先复用 checkpoint 内保存的 `question_neighbors/skill_neighbors`（若存在），避免推理时重采样邻居导致结果漂移。

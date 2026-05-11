@@ -15,9 +15,21 @@ def build_parser():
     parser = argparse.ArgumentParser(description="Inference for GIKT/HGKT")
     parser.add_argument("--data_dir", type=str, default="data")
     parser.add_argument("--dataset", type=str, required=True)
-    parser.add_argument("--model", type=str, required=True, choices=["gikt", "hgkt"])
+    parser.add_argument("--model", type=str, default=None, choices=["gikt", "hgkt"])
     parser.add_argument("--model_path", type=str, required=True)
     parser.add_argument("--config_path", type=str, default="")
+    parser.add_argument(
+        "--noise_levels",
+        type=str,
+        default="",
+        help="Comma-separated noise rates. When set, evaluate each rate by flipping input answers with that probability.",
+    )
+    parser.add_argument(
+        "--noise_seed",
+        type=int,
+        default=42,
+        help="Base random seed used to sample noisy answer flips.",
+    )
 
     # Keep aligned with training defaults for reproducibility.
     parser.add_argument("--hidden_neurons", type=str, default="[200,100]")
@@ -50,6 +62,99 @@ def build_parser():
     return parser
 
 
+def parse_noise_levels(noise_levels_text):
+    if noise_levels_text is None:
+        return []
+    if isinstance(noise_levels_text, (list, tuple)):
+        return [float(level) for level in noise_levels_text]
+    noise_levels_text = str(noise_levels_text).strip()
+    if not noise_levels_text:
+        return []
+    return [float(level.strip()) for level in noise_levels_text.split(",") if level.strip()]
+
+
+def infer_model_type(args, state):
+    checkpoint_model = state.get("model")
+    if isinstance(checkpoint_model, str) and checkpoint_model.strip():
+        checkpoint_model = checkpoint_model.strip().lower()
+        if args.model and args.model.lower() != checkpoint_model:
+            raise ValueError(
+                "Model type mismatch: checkpoint model='{}' but --model='{}'".format(
+                    checkpoint_model, args.model
+                )
+            )
+        return checkpoint_model
+
+    if args.model:
+        return args.model.lower()
+
+    raise ValueError(
+        "Cannot infer model type. Pass --model explicitly or use a checkpoint that stores the model name."
+    )
+
+
+def inject_answer_noise(features_answer_index, seq_lens, noise_rate, rng):
+    if noise_rate <= 0:
+        return features_answer_index
+
+    noisy_features = np.array(features_answer_index, copy=True)
+    for seq_idx, seq_len in enumerate(seq_lens):
+        valid_len = max(0, int(seq_len) - 1)
+        if valid_len <= 0:
+            continue
+
+        flip_mask = rng.random(valid_len) < noise_rate
+        if not np.any(flip_mask):
+            continue
+
+        answer_slice = noisy_features[seq_idx, :valid_len, -1]
+        answer_slice[flip_mask] = 1 - answer_slice[flip_mask]
+        noisy_features[seq_idx, :valid_len, -1] = answer_slice
+
+    return noisy_features
+
+
+def evaluate_once(args, model, device, noise_rate=0.0, noise_seed=42):
+    test_generator = DataGenerator(
+        args.test_seqs,
+        args.max_step,
+        batch_size=args.batch_size,
+        feature_size=args.feature_answer_size - 2,
+        hist_num=args.hist_neighbor_num,
+    )
+    test_generator.reset()
+
+    preds, binary_preds, targets = [], [], []
+    rng = np.random.default_rng(noise_seed)
+
+    with torch.no_grad():
+        while not test_generator.end:
+            features_answer_index, target_answers, seq_lens, hist_neighbor_index = test_generator.next_batch()
+            seq_lens_np = np.asarray(seq_lens)
+            features_answer_index = inject_answer_noise(
+                features_answer_index, seq_lens_np, noise_rate, rng
+            )
+
+            features_answer_index = torch.LongTensor(features_answer_index).to(device)
+            target_answers = torch.FloatTensor(target_answers).to(device)
+            seq_lens = torch.LongTensor(seq_lens).to(device)
+            hist_neighbor_index = torch.LongTensor(hist_neighbor_index).to(device)
+
+            binary_pred, pred, _ = model(features_answer_index, target_answers, seq_lens, hist_neighbor_index)
+            pred_np = pred.cpu().numpy()
+            bin_np = binary_pred.cpu().numpy()
+            tgt_np = target_answers.cpu().numpy()
+            lens_np = seq_lens.cpu().numpy()
+
+            for seq_idx, seq_len in enumerate(lens_np):
+                valid_len = max(0, int(seq_len) - 1)
+                preds.append(pred_np[seq_idx, 0:valid_len])
+                binary_preds.append(bin_np[seq_idx, 0:valid_len])
+                targets.append(tgt_np[seq_idx, 0:valid_len])
+
+    return compute_global_metrics(preds, binary_preds, targets)
+
+
 def evaluate(args):
     if not os.path.exists(args.model_path):
         raise FileNotFoundError("Model checkpoint not found: {}".format(args.model_path))
@@ -75,6 +180,7 @@ def evaluate(args):
             if hasattr(args, key):
                 setattr(args, key, val)
 
+    args.model = infer_model_type(args, state)
     args.hidden_neurons = ast.literal_eval(args.hidden_neurons) if isinstance(args.hidden_neurons, str) else args.hidden_neurons
     args.dropout_keep_probs = ast.literal_eval(args.dropout_keep_probs) if isinstance(args.dropout_keep_probs, str) else args.dropout_keep_probs
     args.select_index = ast.literal_eval(args.select_index) if isinstance(args.select_index, str) else args.select_index
@@ -111,45 +217,27 @@ def evaluate(args):
     # Move tensors inside state dict to target device through load_state_dict call.
     model.load_state_dict(state["model_state_dict"])
     model.eval()
-
-    test_generator = DataGenerator(
-        args.test_seqs,
-        args.max_step,
-        batch_size=args.batch_size,
-        feature_size=args.feature_answer_size - 2,
-        hist_num=args.hist_neighbor_num,
-    )
-    test_generator.reset()
-
-    preds, binary_preds, targets = [], [], []
-    with torch.no_grad():
-        while not test_generator.end:
-            features_answer_index, target_answers, seq_lens, hist_neighbor_index = test_generator.next_batch()
-            features_answer_index = torch.LongTensor(features_answer_index).to(device)
-            target_answers = torch.FloatTensor(target_answers).to(device)
-            seq_lens = torch.LongTensor(seq_lens).to(device)
-            hist_neighbor_index = torch.LongTensor(hist_neighbor_index).to(device)
-
-            binary_pred, pred, _ = model(features_answer_index, target_answers, seq_lens, hist_neighbor_index)
-            pred_np = pred.cpu().numpy()
-            bin_np = binary_pred.cpu().numpy()
-            tgt_np = target_answers.cpu().numpy()
-            lens_np = seq_lens.cpu().numpy()
-
-            for seq_idx, seq_len in enumerate(lens_np):
-                valid_len = max(0, int(seq_len) - 1)
-                preds.append(pred_np[seq_idx, 0:valid_len])
-                binary_preds.append(bin_np[seq_idx, 0:valid_len])
-                targets.append(tgt_np[seq_idx, 0:valid_len])
-
-    auc_value, accuracy, precision, recall, f_score = compute_global_metrics(
-        preds, binary_preds, targets
-    )
     print("dataset={}".format(args.dataset))
     print("model={}".format(args.model))
     print("checkpoint={}".format(args.model_path))
     if args.config_path:
         print("config={}".format(args.config_path))
+
+    noise_levels = parse_noise_levels(getattr(args, "noise_levels", ""))
+    if noise_levels:
+        print("noise_level\ttest_auc\ttest_accuracy")
+        for idx, noise_rate in enumerate(noise_levels):
+            auc_value, accuracy, _, _, _ = evaluate_once(
+                args,
+                model,
+                device,
+                noise_rate=noise_rate,
+                noise_seed=args.noise_seed + idx,
+            )
+            print("{:.1f}\t{:.6f}\t{:.6f}".format(noise_rate, auc_value, accuracy))
+        return
+
+    auc_value, accuracy, precision, recall, f_score = evaluate_once(args, model, device)
     print("test auc={:.6f}".format(auc_value))
     print("test accuracy={:.6f}".format(accuracy))
     print("test precision={:.6f}".format(precision))
