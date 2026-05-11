@@ -88,8 +88,32 @@ def infer_model_type(args, state):
     if args.model:
         return args.model.lower()
 
+    return None
+
+
+def build_model(args, model_name, device):
+    if model_name == "hgkt":
+        return HGKT(args).to(device)
+    return GIKT(args).to(device)
+
+
+def load_model_from_checkpoint(args, state, device):
+    if args.model:
+        model_name = args.model.lower()
+        model = build_model(args, model_name, device)
+        model.load_state_dict(state["model_state_dict"])
+        return model_name, model
+
+    for model_name in ("gikt", "hgkt"):
+        try:
+            trial_model = build_model(args, model_name, device)
+            trial_model.load_state_dict(state["model_state_dict"])
+            return model_name, trial_model
+        except Exception:
+            continue
+
     raise ValueError(
-        "Cannot infer model type. Pass --model explicitly or use a checkpoint that stores the model name."
+        "Cannot infer model type from checkpoint weights. Pass --model explicitly."
     )
 
 
@@ -180,7 +204,6 @@ def evaluate(args):
             if hasattr(args, key):
                 setattr(args, key, val)
 
-    args.model = infer_model_type(args, state)
     args.hidden_neurons = ast.literal_eval(args.hidden_neurons) if isinstance(args.hidden_neurons, str) else args.hidden_neurons
     args.dropout_keep_probs = ast.literal_eval(args.dropout_keep_probs) if isinstance(args.dropout_keep_probs, str) else args.dropout_keep_probs
     args.select_index = ast.literal_eval(args.select_index) if isinstance(args.select_index, str) else args.select_index
@@ -201,21 +224,11 @@ def evaluate(args):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    if args.model == "hgkt":
-        model = HGKT(args).to(device)
-    else:
-        model = GIKT(args).to(device)
+    inferred_model = infer_model_type(args, state)
+    if inferred_model is not None:
+        args.model = inferred_model
 
-    if "model" in state and isinstance(state["model"], str):
-        ckpt_model = state["model"].lower()
-        if ckpt_model != args.model:
-            raise ValueError(
-                "Model type mismatch: checkpoint model='{}' but --model='{}'".format(
-                    ckpt_model, args.model
-                )
-            )
-    # Move tensors inside state dict to target device through load_state_dict call.
-    model.load_state_dict(state["model_state_dict"])
+    args.model, model = load_model_from_checkpoint(args, state, device)
     model.eval()
     print("dataset={}".format(args.dataset))
     print("model={}".format(args.model))
