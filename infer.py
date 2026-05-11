@@ -117,7 +117,16 @@ def load_model_from_checkpoint(args, state, device):
     )
 
 
-def inject_answer_noise(features_answer_index, seq_lens, noise_rate, rng):
+def inject_answer_noise(features_answer_index, seq_lens, noise_rate, rng, feature_base):
+    """
+    Flip answer feature ids for noise simulation.
+
+    The stored answer ids are raw feature ids where:
+      incorrect -> `feature_base`
+      correct   -> `feature_base + 1`
+
+    We must flip between these two raw ids (not do `1 - value`).
+    """
     if noise_rate <= 0:
         return features_answer_index
 
@@ -132,8 +141,36 @@ def inject_answer_noise(features_answer_index, seq_lens, noise_rate, rng):
             continue
 
         answer_slice = noisy_features[seq_idx, :valid_len, -1]
-        answer_slice[flip_mask] = 1 - answer_slice[flip_mask]
-        noisy_features[seq_idx, :valid_len, -1] = answer_slice
+        base = int(feature_base)
+
+        # If raw-id encoding present (base / base+1), flip those.
+        raw_pos = (answer_slice == base) | (answer_slice == base + 1)
+        if np.any(raw_pos):
+            flip_positions = flip_mask & raw_pos
+            if np.any(flip_positions):
+                vals = answer_slice[flip_positions].astype(int)
+                flipped = (base + 1) - (vals - base)
+                answer_slice[flip_positions] = flipped
+                noisy_features[seq_idx, :valid_len, -1] = answer_slice
+            continue
+
+        # Otherwise, if values are binary 0/1, flip 0<->1.
+        if np.all(np.isin(answer_slice, [0, 1])):
+            flip_positions = flip_mask
+            if np.any(flip_positions):
+                vals = answer_slice[flip_positions].astype(int)
+                flipped = 1 - vals
+                answer_slice[flip_positions] = flipped
+                noisy_features[seq_idx, :valid_len, -1] = answer_slice
+            continue
+
+        # Fallback: only flip elements that are exactly 0 or 1.
+        fallback_pos = (answer_slice == 0) | (answer_slice == 1)
+        flip_positions = flip_mask & fallback_pos
+        if np.any(flip_positions):
+            vals = answer_slice[flip_positions].astype(int)
+            answer_slice[flip_positions] = 1 - vals
+            noisy_features[seq_idx, :valid_len, -1] = answer_slice
 
     return noisy_features
 
@@ -156,7 +193,7 @@ def evaluate_once(args, model, device, noise_rate=0.0, noise_seed=42):
             features_answer_index, target_answers, seq_lens, hist_neighbor_index = test_generator.next_batch()
             seq_lens_np = np.asarray(seq_lens)
             features_answer_index = inject_answer_noise(
-                features_answer_index, seq_lens_np, noise_rate, rng
+                features_answer_index, seq_lens_np, noise_rate, rng, args.feature_answer_size - 2
             )
 
             features_answer_index = torch.LongTensor(features_answer_index).to(device)
